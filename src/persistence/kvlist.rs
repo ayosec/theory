@@ -76,9 +76,13 @@ where
     Ok(())
 }
 
-/// Deserialize a list of key-value pairs.
+/// Deserialize a list of key-value pairs from the `input`.
+///
+/// `input_len` must indicate the size of the input. It is used to validate the
+/// length found before every entry.
 pub(crate) fn deserialize<V, R>(
     input: R,
+    input_len: u64,
 ) -> impl Iterator<Item = Result<V, DeserializeError<<V as VariantValue>::DeserializeError>>>
 where
     V: VariantValue,
@@ -86,6 +90,7 @@ where
 {
     StreamParser {
         input,
+        input_len,
         io_valid: true,
         phantom: PhantomData,
     }
@@ -96,8 +101,11 @@ pub(crate) enum DeserializeError<T: std::fmt::Display> {
     #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
 
-    #[error("Failed to get value length: {0}.")]
-    LengthError(#[from] leb128::read::Error),
+    #[error("Failed to read a LEB128 integer: {0}.")]
+    Leb128Error(#[from] leb128::read::Error),
+
+    #[error("Invalid length: {0}.")]
+    InvalidLength(u64),
 
     #[error("Invalid tag.")]
     InvalidByteTag,
@@ -108,6 +116,7 @@ pub(crate) enum DeserializeError<T: std::fmt::Display> {
 
 struct StreamParser<I, T> {
     input: I,
+    input_len: u64,
     io_valid: bool,
     phantom: PhantomData<T>,
 }
@@ -142,6 +151,10 @@ impl<V: VariantValue, I: Read> Iterator for StreamParser<I, V> {
         let key = run!(V::Key::try_from(byte_tag[0]).map_err(|_| DeserializeError::InvalidByteTag));
 
         let value_len = run!(leb128::read::unsigned(&mut self.input));
+        if value_len > self.input_len {
+            return Some(Err(DeserializeError::InvalidLength(value_len)));
+        }
+
         let mut value_bytes = vec![0; value_len as usize];
         run!(self.input.read_exact(&mut value_bytes));
 
@@ -197,7 +210,8 @@ mod tests {
 
         super::serialize(Cursor::new(&mut bytes), [&A("abcd".into()), &B(1234)]).unwrap();
 
-        let mut iter = super::deserialize::<Entry, _>(Cursor::new(&mut bytes));
+        let input_len = bytes.len() as u64;
+        let mut iter = super::deserialize::<Entry, _>(Cursor::new(&mut bytes), input_len);
         assert_eq!(iter.next().unwrap().unwrap(), A("abcd".into()));
         assert_eq!(iter.next().unwrap().unwrap(), B(1234));
         assert!(iter.next().is_none());

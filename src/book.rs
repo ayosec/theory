@@ -52,9 +52,10 @@ impl<I: Read + Seek> Book<I> {
     pub fn metadata(
         &mut self,
     ) -> io::Result<impl Iterator<Item = Result<MetadataEntry, impl std::error::Error>> + '_> {
+        let input_len = self.data_blocks.input_stream_len();
         let input = self.data_blocks.input_stream();
         input.seek(SeekFrom::Start(self.metadata_pos as u64))?;
-        Ok(metadata::load(input))
+        Ok(metadata::load(input, input_len))
     }
 
     /// Return an iterator to get all pages in the book.

@@ -180,13 +180,19 @@ where
         entry.content_block_id.into(),
         |bytes: &[u8]| -> Result<_, page::Error> {
             let content_block_offset = entry.content_block_offset as usize;
-            let mut cursor = Cursor::new(&bytes[content_block_offset..]);
+            let mut cursor = match bytes.get(content_block_offset..) {
+                Some(slice) => Cursor::new(slice),
+                None => return Err(page::Error::InvalidLength(content_block_offset as u64)),
+            };
 
-            let len = leb128::read::unsigned(&mut cursor)?;
-            let mut bytes = vec![0; len as usize];
+            let len = leb128::read::unsigned(&mut cursor)? as usize;
+            let position = cursor.position() as usize + content_block_offset;
+            let bytes = match bytes.get(position..len + position) {
+                Some(bytes) => bytes,
+                None => return Err(page::Error::InvalidLength(len as u64)),
+            };
 
-            cursor.read_exact(&mut bytes)?;
-            Ok(String::from_utf8(bytes)?)
+            Ok(String::from_utf8(bytes.to_owned())?)
         },
     )??;
 
@@ -199,9 +205,13 @@ where
         entry.metadata_block_id.into(),
         |bytes: &[u8]| -> Result<_, page::Error> {
             let metadata_block_offset = entry.metadata_block_offset as usize;
-            let cursor = Cursor::new(&bytes[metadata_block_offset..]);
+            let cursor = match bytes.get(metadata_block_offset..) {
+                Some(slice) => Cursor::new(slice),
+                None => return Err(page::Error::InvalidLength(metadata_block_offset as u64)),
+            };
 
-            for metadata_entry in kvlist::deserialize(cursor) {
+            let input_len = cursor.get_ref().len() as u64;
+            for metadata_entry in kvlist::deserialize(cursor, input_len) {
                 let MetadataEntry(tag, value) =
                     metadata_entry.map_err(|e| page::Error::InvalidMetadata(e.to_string()))?;
 

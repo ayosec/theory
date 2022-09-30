@@ -25,8 +25,11 @@ pub enum Error {
     #[error("Invalid metadata: {0}")]
     InvalidMetadata(String),
 
-    #[error("Invalid input length: {0}.")]
-    InvalidLength(#[from] leb128::read::Error),
+    #[error("Failed to read a LEB128 integer: {0}.")]
+    Leb128Error(#[from] leb128::read::Error),
+
+    #[error("Invalid length: {0}.")]
+    InvalidLength(u64),
 
     #[error("Invalid page identifier: {0}")]
     InvalidId(u32),

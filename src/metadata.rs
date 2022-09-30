@@ -101,9 +101,10 @@ where
 /// Return an iterator to get metadata entries from a `Read` stream.
 pub(crate) fn load<I>(
     input: I,
+    input_len: u64,
 ) -> impl Iterator<Item = Result<MetadataEntry, kvlist::DeserializeError<Error>>>
 where
     I: Read,
 {
-    kvlist::deserialize(input)
+    kvlist::deserialize(input, input_len)
 }

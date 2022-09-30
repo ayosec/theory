@@ -41,7 +41,7 @@ fn write_read() {
     reader.read_exact(&mut prefix).unwrap();
     assert_eq!(&prefix, b"<prefix>");
 
-    let mut reader = super::DataBlocksReader::new(reader);
+    let mut reader = super::DataBlocksReader::new(reader).unwrap();
 
     // The first block contains the ABC sequences.
     let expected = {

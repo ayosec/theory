@@ -36,7 +36,7 @@ where
     let page_index = page::Index::new(&mut input, num_pages, header.pages_pos.into())?;
 
     let book = Book {
-        data_blocks: DataBlocksReader::new(input),
+        data_blocks: DataBlocksReader::new(input)?,
         num_pages,
         metadata_pos: header.metadata_pos.try_into()?,
         page_index,
