@@ -3,7 +3,7 @@
 
 pub(crate) mod persistence;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::num::NonZeroU32;
 
@@ -102,7 +102,7 @@ impl Page {
 
 /// Page index stored in the `page_pos` position.
 pub(crate) struct Index {
-    map: HashMap<PageId, IndexEntry>,
+    entries: BTreeMap<PageId, IndexEntry>,
 }
 
 impl Index {
@@ -111,7 +111,7 @@ impl Index {
     where
         R: Read + Seek,
     {
-        let mut map = HashMap::with_capacity(num_pages);
+        let mut entries = BTreeMap::new();
         input.seek(SeekFrom::Start(position))?;
 
         for _ in 0..num_pages {
@@ -122,12 +122,12 @@ impl Index {
                 None => return Err(Error::InvalidId(ie.id)),
             };
 
-            if map.insert(PageId(page_id), ie).is_some() {
+            if entries.insert(PageId(page_id), ie).is_some() {
                 return Err(Error::DuplicatedId(page_id.get()));
             }
         }
 
-        Ok(Index { map })
+        Ok(Index { entries })
     }
 
     /// Get an iterator to get all pages in the book.
@@ -138,7 +138,7 @@ impl Index {
     where
         R: Read + Seek + 'a,
     {
-        self.map
+        self.entries
             .values()
             .map(move |entry| persistence::build_page(entry, db_reader))
     }
@@ -152,11 +152,20 @@ impl Index {
     where
         R: Read + Seek,
     {
-        let entry = match self.map.get(&page_id) {
+        let entry = match self.entries.get(&page_id) {
             Some(e) => e,
             None => return Err(Error::InvalidId(page_id.0.get())),
         };
 
         persistence::build_page(entry, db_reader)
+    }
+}
+
+impl<'a> IntoIterator for &'a Index {
+    type Item = (&'a PageId, &'a IndexEntry);
+    type IntoIter = std::collections::btree_map::Iter<'a, PageId, IndexEntry>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter()
     }
 }

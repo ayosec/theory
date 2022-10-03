@@ -4,7 +4,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::builder::BookBuilder;
 use crate::persistence::datablock::DataBlocksReader;
-use crate::{metadata, page, persistence, MetadataEntry};
+use crate::{metadata, page, persistence, toc, MetadataEntry};
 
 /// A book loaded from an input stream, like a file.
 ///
@@ -66,5 +66,11 @@ impl<I: Read + Seek> Book<I> {
     /// Return a single page by its identifier.
     pub fn get_page_by_id(&mut self, page_id: page::PageId) -> Result<page::Page, page::Error> {
         self.page_index.get_by_id(&mut self.data_blocks, page_id)
+    }
+
+    /// Table of contents of this book.
+    pub fn toc(&mut self) -> Result<impl Iterator<Item = crate::TocEntry> + '_, toc::TocError> {
+        let toc = toc::BookToc::new(&mut self.data_blocks, &self.page_index)?;
+        Ok(toc.into_iter())
     }
 }

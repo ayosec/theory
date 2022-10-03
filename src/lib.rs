@@ -5,6 +5,7 @@
 mod book;
 mod metadata;
 mod page;
+mod toc;
 
 pub(crate) mod builder;
 pub(crate) mod persistence;
@@ -15,3 +16,4 @@ pub use metadata::MetadataEntry;
 pub use page::Error as PageError;
 pub use page::Page;
 pub use persistence::Error as PersistenceError;
+pub use toc::TocEntry;

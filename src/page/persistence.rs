@@ -71,7 +71,7 @@ macro_rules! to_u32 {
 /// A single entry in the page index.
 #[derive(Io, Debug)]
 #[endian(big)]
-pub(super) struct IndexEntry {
+pub(crate) struct IndexEntry {
     /// Page identifier.
     pub(super) id: u32,
 
@@ -89,6 +89,47 @@ pub(super) struct IndexEntry {
 
     /// Offset in the data block for the page content.
     pub(super) content_block_offset: u32,
+}
+
+impl IndexEntry {
+    pub(crate) fn parent_id(&self) -> Option<page::PageId> {
+        NonZeroU32::new(self.parent_id).map(page::PageId)
+    }
+
+    pub(crate) fn get_page_title<I>(
+        &self,
+        db_reader: &mut DataBlocksReader<I>,
+    ) -> Result<String, page::Error>
+    where
+        I: Read + Seek,
+    {
+        let title = db_reader.with_block(
+            self.metadata_block_id.into(),
+            |bytes: &[u8]| -> Result<Option<String>, page::Error> {
+                let metadata_block_offset = self.metadata_block_offset as usize;
+                let cursor = match bytes.get(metadata_block_offset..) {
+                    Some(slice) => Cursor::new(slice),
+                    None => return Err(page::Error::InvalidLength(metadata_block_offset as u64)),
+                };
+
+                let input_len = cursor.get_ref().len() as u64;
+                for metadata_entry in kvlist::deserialize(cursor, input_len) {
+                    let MetadataEntry(tag, value) =
+                        metadata_entry.map_err(|e| page::Error::InvalidMetadata(e.to_string()))?;
+
+                    let value = value.into_owned();
+
+                    if matches!(tag, ByteTag::Title) {
+                        return Ok(Some(value));
+                    }
+                }
+
+                Ok(None)
+            },
+        );
+
+        Ok(title??.unwrap_or_default())
+    }
 }
 
 /// Write the page table and the data block in the output stream.
