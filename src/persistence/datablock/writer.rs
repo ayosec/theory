@@ -167,7 +167,7 @@ impl<S: Write + Seek> Fragment<'_, S> {
 impl<S: Write> Write for Fragment<'_, S> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
         let n = self.writer.write(buf)?;
-        *self.writer_offset += buf.len() as u64;
+        *self.writer_offset += n as u64;
         Ok(n)
     }
 
