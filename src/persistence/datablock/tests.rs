@@ -52,11 +52,11 @@ fn write_read() {
         bytes
     };
 
-    let block_bytes = reader.with_block(block1, |b| Vec::from(b)).unwrap();
+    let block_bytes = reader.with_block(block1, 0, |b| Vec::from(b)).unwrap();
     assert_eq!(block_bytes, expected);
 
     // The second block contains 10×'D'.
     let expected = vec![b'D'; 10];
-    let block_bytes = reader.with_block(block2, |b| Vec::from(b)).unwrap();
+    let block_bytes = reader.with_block(block2, 0, |b| Vec::from(b)).unwrap();
     assert_eq!(block_bytes, expected);
 }

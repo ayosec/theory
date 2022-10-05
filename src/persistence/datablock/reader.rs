@@ -26,12 +26,22 @@ impl<S: Read + Seek> DataBlocksReader<S> {
         self.stream_len
     }
 
-    /// Get a block from its identifier. The function is applied only if the
-    /// block can be fully read.
-    pub(crate) fn with_block<F, T>(&mut self, block_id: u64, f: F) -> io::Result<T>
+    /// Get a block from its identifier.
+    ///
+    /// The function is applied only if the block can be fully read, and the
+    /// offset is within the block.
+    pub(crate) fn with_block<F, T, O>(&mut self, block_id: u64, offset: O, f: F) -> io::Result<T>
     where
         F: FnOnce(&[u8]) -> T,
+        O: TryInto<usize>,
     {
+        let offset = O::try_into(offset).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "offset cannot be converted to usize",
+            )
+        })?;
+
         // TODO use LRU cache
         self.stream.seek(SeekFrom::Start(block_id))?;
 
@@ -48,6 +58,13 @@ impl<S: Read + Seek> DataBlocksReader<S> {
         let mut len = [0; 4];
         self.stream.read_exact(&mut len)?;
         let len = u32::from_be_bytes(len);
+
+        if offset > len as usize {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "offset is beyond end of the block",
+            ));
+        }
 
         if block_id.saturating_add(len as u64) > self.stream_len {
             return Err(io::Error::new(
@@ -66,6 +83,6 @@ impl<S: Read + Seek> DataBlocksReader<S> {
             }
         }
 
-        Ok(f(&data[..]))
+        Ok(f(&data[offset..]))
     }
 }

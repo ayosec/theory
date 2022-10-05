@@ -105,14 +105,11 @@ impl IndexEntry {
     {
         let title = db_reader.with_block(
             self.metadata_block_id.into(),
+            self.metadata_block_offset,
             |bytes: &[u8]| -> Result<Option<String>, page::Error> {
-                let metadata_block_offset = self.metadata_block_offset as usize;
-                let cursor = match bytes.get(metadata_block_offset..) {
-                    Some(slice) => Cursor::new(slice),
-                    None => return Err(page::Error::InvalidLength(metadata_block_offset as u64)),
-                };
+                let input_len = bytes.len() as u64;
+                let cursor = Cursor::new(bytes);
 
-                let input_len = cursor.get_ref().len() as u64;
                 for metadata_entry in kvlist::deserialize(cursor, input_len) {
                     let MetadataEntry(tag, value) =
                         metadata_entry.map_err(|e| page::Error::InvalidMetadata(e.to_string()))?;
@@ -219,15 +216,12 @@ where
     // Page content.
     let content = db_reader.with_block(
         entry.content_block_id.into(),
+        entry.content_block_offset,
         |bytes: &[u8]| -> Result<_, page::Error> {
-            let content_block_offset = entry.content_block_offset as usize;
-            let mut cursor = match bytes.get(content_block_offset..) {
-                Some(slice) => Cursor::new(slice),
-                None => return Err(page::Error::InvalidLength(content_block_offset as u64)),
-            };
+            let mut cursor = Cursor::new(bytes);
 
             let len = leb128::read::unsigned(&mut cursor)? as usize;
-            let position = cursor.position() as usize + content_block_offset;
+            let position = cursor.position() as usize;
             let bytes = match bytes.get(position..len + position) {
                 Some(bytes) => bytes,
                 None => return Err(page::Error::InvalidLength(len as u64)),
@@ -244,14 +238,11 @@ where
 
     db_reader.with_block(
         entry.metadata_block_id.into(),
+        entry.metadata_block_offset,
         |bytes: &[u8]| -> Result<_, page::Error> {
-            let metadata_block_offset = entry.metadata_block_offset as usize;
-            let cursor = match bytes.get(metadata_block_offset..) {
-                Some(slice) => Cursor::new(slice),
-                None => return Err(page::Error::InvalidLength(metadata_block_offset as u64)),
-            };
+            let input_len = bytes.len() as u64;
+            let cursor = Cursor::new(bytes);
 
-            let input_len = cursor.get_ref().len() as u64;
             for metadata_entry in kvlist::deserialize(cursor, input_len) {
                 let MetadataEntry(tag, value) =
                     metadata_entry.map_err(|e| page::Error::InvalidMetadata(e.to_string()))?;
