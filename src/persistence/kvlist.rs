@@ -23,6 +23,7 @@ use std::marker::PhantomData;
 pub(crate) enum InnerValue<'a> {
     Array8([u8; 8]),
     Slice(&'a [u8]),
+    Buffer(Vec<u8>),
 }
 
 impl AsRef<[u8]> for InnerValue<'_> {
@@ -30,6 +31,7 @@ impl AsRef<[u8]> for InnerValue<'_> {
         match self {
             Self::Array8(a) => &a[..],
             Self::Slice(s) => s,
+            Self::Buffer(b) => &b[..],
         }
     }
 }

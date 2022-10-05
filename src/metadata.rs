@@ -26,6 +26,7 @@ pub(crate) enum ByteTag {
     Language = 3,
     Date = 4,
     License = 5,
+    User = 100,
 }
 
 /// Metadata associated to a book.
@@ -37,6 +38,7 @@ pub enum MetadataEntry {
     Language(String),
     Date(u64),
     License(String),
+    User(String, String),
 }
 
 impl kvlist::VariantValue for MetadataEntry {
@@ -44,7 +46,7 @@ impl kvlist::VariantValue for MetadataEntry {
     type DeserializeError = Error;
 
     fn serialize(&self) -> (Self::Key, kvlist::InnerValue) {
-        use kvlist::InnerValue::{Array8, Slice};
+        use kvlist::InnerValue::{Array8, Buffer, Slice};
 
         let key = match self {
             MetadataEntry::Title(_) => ByteTag::Title,
@@ -52,14 +54,25 @@ impl kvlist::VariantValue for MetadataEntry {
             MetadataEntry::Language(_) => ByteTag::Language,
             MetadataEntry::Date(_) => ByteTag::Date,
             MetadataEntry::License(_) => ByteTag::License,
+            MetadataEntry::User(_, _) => ByteTag::User,
         };
 
         let value = match self {
             MetadataEntry::Date(d) => Array8(d.to_be_bytes()),
+
             MetadataEntry::Title(s)
             | MetadataEntry::Author(s)
             | MetadataEntry::Language(s)
             | MetadataEntry::License(s) => Slice(s.as_bytes()),
+
+            MetadataEntry::User(k, v) => {
+                let mut buffer = Vec::with_capacity(k.len() + v.len() + 1);
+                leb128::write::unsigned(&mut buffer, k.len() as u64)
+                    .unwrap_or_else(|_| unreachable!());
+                buffer.extend_from_slice(k.as_bytes());
+                buffer.extend_from_slice(v.as_bytes());
+                Buffer(buffer)
+            }
         };
 
         (key, value)
@@ -84,6 +97,34 @@ impl kvlist::VariantValue for MetadataEntry {
                 .try_into()
                 .map(|b| MetadataEntry::Date(u64::from_be_bytes(b)))
                 .map_err(|_| Error::InvalidLength),
+
+            ByteTag::User => {
+                let bytes_len = bytes.len() as u64;
+                let mut input = io::Cursor::new(bytes);
+
+                let value_len =
+                    leb128::read::unsigned(&mut input).map_err(|_| Error::InvalidLength)?;
+
+                if value_len > bytes_len {
+                    return Err(Error::InvalidLength);
+                }
+
+                let mut key = vec![0; value_len as usize];
+                input
+                    .read_exact(&mut key)
+                    .map_err(|_| Error::InvalidLength)?;
+
+                let key = String::from_utf8(key).map_err(Error::UnicodeError)?;
+
+                let mut value = Vec::with_capacity((bytes_len - input.position()) as usize);
+                input
+                    .read_to_end(&mut value)
+                    .map_err(|_| Error::InvalidLength)?;
+
+                let value = String::from_utf8(value).map_err(Error::UnicodeError)?;
+
+                Ok(MetadataEntry::User(key, value))
+            }
         }
     }
 }
@@ -107,4 +148,22 @@ where
     I: Read,
 {
     kvlist::deserialize(input, input_len)
+}
+
+#[test]
+fn write_read_metadata() {
+    let entries = [
+        MetadataEntry::Title("title".into()),
+        MetadataEntry::Date(1234567890),
+        MetadataEntry::User("key".into(), "value".into()),
+    ];
+
+    let mut buf = Vec::new();
+    dump(io::Cursor::new(&mut buf), &entries).unwrap();
+
+    let loaded = load(io::Cursor::new(&buf), buf.len() as u64)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(entries, loaded[..]);
 }
