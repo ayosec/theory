@@ -11,6 +11,7 @@ authors = [ "ayosec@gmail.com" ]
 [dependencies]
 endiannezz = "0.6.5"
 leb128 = "0.2.5"
+lru = { version = "0.8.1", default-features = false }
 num_enum = { version = "0.5.7", default-features = false }
 thiserror = "1.0.36"
 tinyvec = { version = "1.6.0", features = ["rustc_1_57", "alloc"] }
