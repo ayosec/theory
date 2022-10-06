@@ -1,17 +1,43 @@
-//! Support to include metadata entries in a book.
+//! Types for the metadata functionality.
+//!
+//! Both `Page` and `Book` support any number of metadata entries, which are
+//! defined as [`MetadataEntry`] values.
+//!
+//! # Binary Format
+//!
+//! Metadata entries are encoded as a list of key-value pairs.
+//!
+//! The binary format is stable, and it should be easy to read from other
+//! programs.
+//!
+//! * The first byte is a tag to indicate the type.
+//! * The next bytes is the length of the value, encoded as LEB128.
+//! * The rest of the bytes is the value.
+//!
+//! If the entry has multiple values (like `MetadataEntry::User`), each value is
+//! preceded by its length in bytes.
+//!
+//! Tag `0` is used to indicate that all pairs have been read.
 
 use std::io::{self, Read, Write};
 
-use crate::persistence::kvlist;
-
 /// Errors related to serialize operations.
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum LoadError {
     #[error("Invalid UTF-8 sequence.")]
     UnicodeError(#[from] std::string::FromUtf8Error),
 
-    #[error("Invalid entry length.")]
-    InvalidLength,
+    #[error("I/O error: {0}")]
+    IoError(#[from] io::Error),
+
+    #[error("Failed to read a LEB128 integer: {0}.")]
+    Leb128Error(#[from] leb128::read::Error),
+
+    #[error("Invalid length: {0}.")]
+    InvalidLength(u64),
+
+    #[error("Invalid tag.")]
+    InvalidByteTag(u8),
 }
 
 /// A number to specify the type of the entry in the metadata table.
@@ -43,116 +69,134 @@ pub enum MetadataEntry {
     User(String, String),
 }
 
-impl kvlist::VariantValue for MetadataEntry {
-    type Key = ByteTag;
-    type DeserializeError = Error;
-
-    fn serialize(&self) -> (Self::Key, kvlist::InnerValue) {
-        use kvlist::InnerValue::{Array8, Buffer, Slice};
-
-        let key = match self {
-            MetadataEntry::Title(_) => ByteTag::Title,
-            MetadataEntry::Author(_) => ByteTag::Author,
-            MetadataEntry::Language(_) => ByteTag::Language,
-            MetadataEntry::Date(_) => ByteTag::Date,
-            MetadataEntry::License(_) => ByteTag::License,
-            MetadataEntry::Keyword(_) => ByteTag::Keyword,
-            MetadataEntry::User(_, _) => ByteTag::User,
-        };
-
-        let value = match self {
-            MetadataEntry::Date(d) => Array8(d.to_be_bytes()),
-
-            MetadataEntry::Title(s)
-            | MetadataEntry::Author(s)
-            | MetadataEntry::Language(s)
-            | MetadataEntry::License(s)
-            | MetadataEntry::Keyword(s) => Slice(s.as_bytes()),
-
-            MetadataEntry::User(k, v) => {
-                let mut buffer = Vec::with_capacity(k.len() + v.len() + 1);
-                leb128::write::unsigned(&mut buffer, k.len() as u64)
-                    .unwrap_or_else(|_| unreachable!());
-                buffer.extend_from_slice(k.as_bytes());
-                buffer.extend_from_slice(v.as_bytes());
-                Buffer(buffer)
-            }
-        };
-
-        (key, value)
-    }
-
-    fn deserialize(key: Self::Key, bytes: Vec<u8>) -> Result<Self, Self::DeserializeError> {
-        macro_rules! value_str {
-            ($variant:ident) => {
-                String::from_utf8(bytes)
-                    .map_err(|e| e.into())
-                    .map(|s| MetadataEntry::$variant(s))
-            };
-        }
-
-        match key {
-            ByteTag::Title => value_str!(Title),
-            ByteTag::Author => value_str!(Author),
-            ByteTag::Language => value_str!(Language),
-            ByteTag::License => value_str!(License),
-            ByteTag::Keyword => value_str!(Keyword),
-
-            ByteTag::Date => bytes
-                .try_into()
-                .map(|b| MetadataEntry::Date(u64::from_be_bytes(b)))
-                .map_err(|_| Error::InvalidLength),
-
-            ByteTag::User => {
-                let bytes_len = bytes.len() as u64;
-                let mut input = io::Cursor::new(bytes);
-
-                let value_len =
-                    leb128::read::unsigned(&mut input).map_err(|_| Error::InvalidLength)?;
-
-                if value_len > bytes_len {
-                    return Err(Error::InvalidLength);
-                }
-
-                let mut key = vec![0; value_len as usize];
-                input
-                    .read_exact(&mut key)
-                    .map_err(|_| Error::InvalidLength)?;
-
-                let key = String::from_utf8(key).map_err(Error::UnicodeError)?;
-
-                let mut value = Vec::with_capacity((bytes_len - input.position()) as usize);
-                input
-                    .read_to_end(&mut value)
-                    .map_err(|_| Error::InvalidLength)?;
-
-                let value = String::from_utf8(value).map_err(Error::UnicodeError)?;
-
-                Ok(MetadataEntry::User(key, value))
-            }
-        }
-    }
-}
-
 /// Write metadata in the format described in the module documentation.
-pub(crate) fn dump<'a, O, E, M>(output: O, metadata: M) -> io::Result<()>
+pub(crate) fn dump<'a, O, M>(mut output: O, metadata: M) -> io::Result<()>
 where
     O: Write,
-    E: Into<&'a MetadataEntry>,
-    M: IntoIterator<Item = E>,
+    M: IntoIterator<Item = &'a MetadataEntry>,
 {
-    kvlist::serialize(output, metadata.into_iter().map(|e| e.into()))
+    for entry in metadata.into_iter() {
+        macro_rules! w {
+            ($tag:ident, $($values:expr),*) => {{
+                let tag: u8 = ByteTag::$tag.into();
+                debug_assert!(tag != 0);
+
+                output.write_all(&[tag])?;
+
+                $(
+                    let bytes = $values;
+
+                    leb128::write::unsigned(&mut output, bytes.len() as u64)?;
+                    output.write_all(bytes)?;
+                )*
+            }}
+        }
+
+        match entry {
+            MetadataEntry::Title(s) => w!(Title, s.as_bytes()),
+            MetadataEntry::Author(s) => w!(Author, s.as_bytes()),
+            MetadataEntry::Language(s) => w!(Language, s.as_bytes()),
+            MetadataEntry::Date(d) => w!(Date, &d.to_be_bytes()),
+            MetadataEntry::License(s) => w!(License, s.as_bytes()),
+            MetadataEntry::Keyword(s) => w!(Keyword, s.as_bytes()),
+            MetadataEntry::User(k, v) => w!(User, k.as_bytes(), v.as_bytes()),
+        }
+    }
+
+    output.write_all(&[0])?;
+
+    Ok(())
 }
 
 /// Return an iterator to get metadata entries from a `Read` stream.
 pub(crate) fn load<I>(
     input: I,
     input_len: u64,
-) -> impl Iterator<Item = Result<MetadataEntry, kvlist::DeserializeError<Error>>>
+) -> impl Iterator<Item = Result<MetadataEntry, LoadError>>
 where
     I: Read,
 {
-    kvlist::deserialize(input, input_len)
+    BinaryDataParser {
+        input,
+        input_len,
+        io_valid: true,
+    }
+}
+
+struct BinaryDataParser<I> {
+    input: I,
+    input_len: u64,
+    io_valid: bool,
+}
+
+impl<I: Read> Iterator for BinaryDataParser<I> {
+    type Item = Result<MetadataEntry, LoadError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.io_valid {
+            return None;
+        }
+
+        macro_rules! run {
+            ($io:expr) => {
+                match $io {
+                    Ok(result) => result,
+                    Err(e) => {
+                        self.io_valid = false;
+                        return Some(Err(e.into()));
+                    }
+                }
+            };
+        }
+
+        let mut byte_tag = [0xFF];
+        run!(self.input.read_exact(&mut byte_tag));
+
+        if byte_tag[0] == 0 {
+            return None;
+        }
+
+        let key = run!(
+            ByteTag::try_from(byte_tag[0]).map_err(|_| LoadError::InvalidByteTag(byte_tag[0]))
+        );
+
+        macro_rules! next_value {
+            () => {{
+                let value_len = run!(leb128::read::unsigned(&mut self.input));
+                if value_len > self.input_len {
+                    self.io_valid = false;
+                    return Some(Err(LoadError::InvalidLength(value_len)));
+                }
+
+                let mut value_bytes = vec![0; value_len as usize];
+                run!(self.input.read_exact(&mut value_bytes));
+
+                value_bytes
+            }};
+        }
+
+        macro_rules! next_str {
+            () => {
+                run!(String::from_utf8(next_value!()).map_err(LoadError::UnicodeError))
+            };
+        }
+
+        let item = match key {
+            ByteTag::Title => Ok(MetadataEntry::Title(next_str!())),
+            ByteTag::Author => Ok(MetadataEntry::Author(next_str!())),
+            ByteTag::Language => Ok(MetadataEntry::Language(next_str!())),
+            ByteTag::License => Ok(MetadataEntry::License(next_str!())),
+            ByteTag::Keyword => Ok(MetadataEntry::Keyword(next_str!())),
+            ByteTag::User => Ok(MetadataEntry::User(next_str!(), next_str!())),
+
+            ByteTag::Date => next_value!()
+                .try_into()
+                .map(|b| MetadataEntry::Date(u64::from_be_bytes(b)))
+                .map_err(|e| LoadError::InvalidLength(e.len() as u64)),
+        };
+
+        Some(item)
+    }
 }
 
 #[test]

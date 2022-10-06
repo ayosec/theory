@@ -7,7 +7,6 @@ use crate::builder::BookBuilder;
 mod v1;
 
 pub(crate) mod datablock;
-pub(crate) mod kvlist;
 
 /// Errors related to persistence operations.
 #[derive(thiserror::Error, Debug)]

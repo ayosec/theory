@@ -23,7 +23,7 @@ use std::io::{self, Cursor, Read, Seek, Write};
 use std::num::NonZeroU32;
 
 use crate::persistence::datablock::{DataBlocksReader, DataBlocksWriter};
-use crate::{page, persistence::kvlist, MetadataEntry, Page};
+use crate::{metadata, page, MetadataEntry, Page};
 
 use endiannezz::Io;
 
@@ -83,7 +83,7 @@ impl IndexEntry {
                 let input_len = bytes.len() as u64;
                 let cursor = Cursor::new(bytes);
 
-                let entries = kvlist::deserialize(cursor, input_len).flatten();
+                let entries = metadata::load(cursor, input_len).flatten();
                 for entry in entries {
                     if let MetadataEntry::Title(title) = entry {
                         return Ok(Some(title));
@@ -132,7 +132,7 @@ where
 
         // Metadata
         let metadata_block_offset = to_u32!(metadata_buf.len());
-        kvlist::serialize(&mut metadata_buf, &page.metadata)?;
+        metadata::dump(&mut metadata_buf, &page.metadata)?;
 
         // Page index.
         //
