@@ -8,6 +8,8 @@ repository = "https://github.com/ayosec/theory.git"
 description = "Documentation viewer (WIP)"
 authors = [ "ayosec@gmail.com" ]
 
+exclude = [ ".git*" ]
+
 [dependencies]
 endiannezz = "0.6.5"
 leb128 = "0.2.5"
