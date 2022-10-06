@@ -121,7 +121,7 @@ where
 
     for page in pages.map(|e| e.into()) {
         // Content is written directly to the output stream.
-        let content = page.content.as_deref().unwrap_or("").as_bytes();
+        let content = &page.content;
         let mut fragment = db_writer.fragment(content.len() as u64)?;
 
         leb128::write::unsigned(&mut fragment, content.len() as u64)?;
@@ -187,7 +187,7 @@ where
                 None => return Err(page::Error::InvalidLength(len as u64)),
             };
 
-            Ok(String::from_utf8(bytes.to_owned())?)
+            Ok(bytes.to_owned())
         },
     )??;
 
@@ -207,7 +207,7 @@ where
         id: NonZeroU32::new(entry.id).ok_or(page::Error::InvalidId(0))?,
         parent_id: NonZeroU32::new(entry.parent_id),
         metadata,
-        content: Some(content),
+        content,
     };
 
     Ok(page)

@@ -65,7 +65,7 @@ pub struct Page {
 
     pub(crate) metadata: Vec<MetadataEntry>,
 
-    pub(crate) content: Option<String>,
+    pub(crate) content: Vec<u8>,
 }
 
 impl Page {
@@ -74,7 +74,7 @@ impl Page {
             id,
             parent_id: None,
             metadata: vec![MetadataEntry::Title(title)],
-            content: None,
+            content: Vec::new(),
         }
     }
 
@@ -96,8 +96,8 @@ impl Page {
     }
 
     /// Set the content for this page.
-    pub fn set_content(&mut self, content: impl Into<String>) -> &mut Page {
-        self.content = Some(content.into());
+    pub fn set_content(&mut self, content: impl Into<Vec<u8>>) -> &mut Page {
+        self.content = content.into();
         self
     }
 }
