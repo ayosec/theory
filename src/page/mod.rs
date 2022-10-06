@@ -100,6 +100,21 @@ impl Page {
         self.content = content.into();
         self
     }
+
+    /// Return the parent of this page.
+    pub fn parent(&self) -> Option<PageId> {
+        self.parent_id.map(PageId)
+    }
+
+    /// Return the content of this page.
+    pub fn content(&self) -> &[u8] {
+        &self.content
+    }
+
+    /// Return the metadata of this page.
+    pub fn metadata(&self) -> &[MetadataEntry] {
+        &self.metadata
+    }
 }
 
 /// Page index stored in the `page_pos` position.
