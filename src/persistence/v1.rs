@@ -105,16 +105,14 @@ fn dump_and_load() {
 
     let page1 = builder
         .new_page("First")
-        .set_keywords("abc, def")
-        .set_description("abcdef")
+        .add_metadata(MetadataEntry::Keyword("abcdef".into()))
         .set_content("- 1 -")
         .clone();
 
     let page2 = builder
         .new_page("Second")
         .set_parent(page1.id())
-        .set_keywords("abc, def")
-        .set_description("abcdef")
+        .add_metadata(MetadataEntry::Keyword("abc, def".into()))
         .set_content("- 2 -")
         .clone();
 

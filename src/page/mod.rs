@@ -9,6 +9,7 @@ use std::num::NonZeroU32;
 
 use self::persistence::IndexEntry;
 use crate::persistence::datablock::DataBlocksReader;
+use crate::MetadataEntry;
 
 use endiannezz::Io;
 
@@ -49,11 +50,7 @@ pub struct Page {
 
     pub(crate) parent_id: Option<NonZeroU32>,
 
-    pub(crate) title: String,
-
-    pub(crate) keywords: Option<String>,
-
-    pub(crate) description: Option<String>,
+    pub(crate) metadata: Vec<MetadataEntry>,
 
     pub(crate) content: Option<String>,
 }
@@ -63,9 +60,7 @@ impl Page {
         Page {
             id,
             parent_id: None,
-            title,
-            keywords: None,
-            description: None,
+            metadata: vec![MetadataEntry::Title(title)],
             content: None,
         }
     }
@@ -81,15 +76,9 @@ impl Page {
         self
     }
 
-    /// Set the keywords for this page.
-    pub fn set_keywords(&mut self, keywords: impl Into<String>) -> &mut Page {
-        self.keywords = Some(keywords.into());
-        self
-    }
-
-    /// Set the description for this page.
-    pub fn set_description(&mut self, description: impl Into<String>) -> &mut Page {
-        self.description = Some(description.into());
+    /// Add a metadata entry to the page.
+    pub fn add_metadata(&mut self, entry: MetadataEntry) -> &mut Page {
+        self.metadata.push(entry);
         self
     }
 

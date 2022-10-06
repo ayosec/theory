@@ -19,40 +19,13 @@
 //!
 //! [`pages_pos`]: crate::Package::pages_pos
 
-use std::borrow::Cow;
 use std::io::{self, Cursor, Read, Seek, Write};
 use std::num::NonZeroU32;
 
 use crate::persistence::datablock::{DataBlocksReader, DataBlocksWriter};
-use crate::{page, persistence::kvlist, Page};
+use crate::{page, persistence::kvlist, MetadataEntry, Page};
 
 use endiannezz::Io;
-
-/// Tag for the metadata entries for each page.
-#[derive(num_enum::TryFromPrimitive, num_enum::IntoPrimitive, Debug, Copy, Clone)]
-#[repr(u8)]
-pub(crate) enum ByteTag {
-    Title = 1,
-    Keywords = 2,
-    Description = 3,
-}
-
-#[derive(Debug)]
-struct MetadataEntry<'a>(ByteTag, Cow<'a, str>);
-
-impl kvlist::VariantValue for MetadataEntry<'_> {
-    type Key = ByteTag;
-
-    type DeserializeError = std::string::FromUtf8Error;
-
-    fn serialize(&self) -> (Self::Key, kvlist::InnerValue) {
-        (self.0, kvlist::InnerValue::Slice(self.1.as_bytes()))
-    }
-
-    fn deserialize(key: Self::Key, bytes: Vec<u8>) -> Result<Self, Self::DeserializeError> {
-        Ok(MetadataEntry(key, String::from_utf8(bytes)?.into()))
-    }
-}
 
 macro_rules! to_u32 {
     ($e:expr) => {
@@ -110,14 +83,10 @@ impl IndexEntry {
                 let input_len = bytes.len() as u64;
                 let cursor = Cursor::new(bytes);
 
-                for metadata_entry in kvlist::deserialize(cursor, input_len) {
-                    let MetadataEntry(tag, value) =
-                        metadata_entry.map_err(|e| page::Error::InvalidMetadata(e.to_string()))?;
-
-                    let value = value.into_owned();
-
-                    if matches!(tag, ByteTag::Title) {
-                        return Ok(Some(value));
+                let entries = kvlist::deserialize(cursor, input_len).flatten();
+                for entry in entries {
+                    if let MetadataEntry::Title(title) = entry {
+                        return Ok(Some(title));
                     }
                 }
 
@@ -163,16 +132,7 @@ where
 
         // Metadata
         let metadata_block_offset = to_u32!(metadata_buf.len());
-        let entries: Vec<_> = [
-            (ByteTag::Title, Some(page.title.as_ref())),
-            (ByteTag::Keywords, page.keywords.as_deref()),
-            (ByteTag::Description, page.description.as_deref()),
-        ]
-        .iter()
-        .filter_map(|(tag, value)| value.map(|v| MetadataEntry(*tag, Cow::Borrowed(v))))
-        .collect();
-
-        kvlist::serialize(&mut metadata_buf, &entries)?;
+        kvlist::serialize(&mut metadata_buf, &page.metadata)?;
 
         // Page index.
         //
@@ -232,31 +192,13 @@ where
     )??;
 
     // Page metadata.
-    let mut title = None;
-    let mut keywords = None;
-    let mut description = None;
-
-    db_reader.with_block(
+    let metadata = db_reader.with_block(
         entry.metadata_block_id.into(),
         entry.metadata_block_offset,
         |bytes: &[u8]| -> Result<_, page::Error> {
-            let input_len = bytes.len() as u64;
-            let cursor = Cursor::new(bytes);
-
-            for metadata_entry in kvlist::deserialize(cursor, input_len) {
-                let MetadataEntry(tag, value) =
-                    metadata_entry.map_err(|e| page::Error::InvalidMetadata(e.to_string()))?;
-
-                let value = value.into_owned();
-
-                match tag {
-                    ByteTag::Title => title = Some(value),
-                    ByteTag::Keywords => keywords = Some(value),
-                    ByteTag::Description => description = Some(value),
-                }
-            }
-
-            Ok(())
+            crate::metadata::load(io::Cursor::new(bytes), bytes.len() as u64)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| page::Error::InvalidMetadata(e.to_string()))
         },
     )??;
 
@@ -264,9 +206,7 @@ where
     let page = Page {
         id: NonZeroU32::new(entry.id).ok_or(page::Error::InvalidId(0))?,
         parent_id: NonZeroU32::new(entry.parent_id),
-        title: title.unwrap_or_default(),
-        keywords,
-        description,
+        metadata,
         content: Some(content),
     };
 

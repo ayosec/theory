@@ -26,6 +26,7 @@ pub(crate) enum ByteTag {
     Language = 3,
     Date = 4,
     License = 5,
+    Keyword = 6,
     User = 100,
 }
 
@@ -38,6 +39,7 @@ pub enum MetadataEntry {
     Language(String),
     Date(u64),
     License(String),
+    Keyword(String),
     User(String, String),
 }
 
@@ -54,6 +56,7 @@ impl kvlist::VariantValue for MetadataEntry {
             MetadataEntry::Language(_) => ByteTag::Language,
             MetadataEntry::Date(_) => ByteTag::Date,
             MetadataEntry::License(_) => ByteTag::License,
+            MetadataEntry::Keyword(_) => ByteTag::Keyword,
             MetadataEntry::User(_, _) => ByteTag::User,
         };
 
@@ -63,7 +66,8 @@ impl kvlist::VariantValue for MetadataEntry {
             MetadataEntry::Title(s)
             | MetadataEntry::Author(s)
             | MetadataEntry::Language(s)
-            | MetadataEntry::License(s) => Slice(s.as_bytes()),
+            | MetadataEntry::License(s)
+            | MetadataEntry::Keyword(s) => Slice(s.as_bytes()),
 
             MetadataEntry::User(k, v) => {
                 let mut buffer = Vec::with_capacity(k.len() + v.len() + 1);
@@ -92,6 +96,7 @@ impl kvlist::VariantValue for MetadataEntry {
             ByteTag::Author => value_str!(Author),
             ByteTag::Language => value_str!(Language),
             ByteTag::License => value_str!(License),
+            ByteTag::Keyword => value_str!(Keyword),
 
             ByteTag::Date => bytes
                 .try_into()
