@@ -11,22 +11,22 @@ fn write_read() {
 
     // First fragment: 50×'A' + 50×'B'
     let mut fragment = writer.fragment(100).unwrap();
-    fragment.write(&[b'A'; 50]).unwrap();
-    fragment.write(&[b'B'; 50]).unwrap();
+    fragment.write_all(&[b'A'; 50]).unwrap();
+    fragment.write_all(&[b'B'; 50]).unwrap();
 
     let block1 = fragment.block_id();
     assert_eq!(fragment.offset(), 0);
 
     // Second fragment: 10×'C'
     let mut fragment = writer.fragment(10).unwrap();
-    fragment.write(&[b'C'; 10]).unwrap();
+    fragment.write_all(&[b'C'; 10]).unwrap();
 
     assert_eq!(block1, fragment.block_id());
     assert_eq!(fragment.offset(), 100);
 
     // Third fragment: 10×'D', but use a very big number as the hint.
     let mut fragment = writer.fragment(0xFFFFFF).unwrap();
-    fragment.write(&[b'D'; 10]).unwrap();
+    fragment.write_all(&[b'D'; 10]).unwrap();
 
     let block2 = fragment.block_id();
     assert_eq!(fragment.offset(), 0);

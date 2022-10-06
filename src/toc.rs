@@ -190,7 +190,7 @@ mod tests {
             .expect("BookBuilder::dump");
 
         let mut book = Book::load(Cursor::new(buffer)).unwrap();
-        let mut toc = book.toc().expect("Book::toc").into_iter();
+        let mut toc = book.toc().expect("Book::toc");
 
         macro_rules! assert_page {
             ($iter:expr, $id:expr, $title:expr, $section:expr) => {
