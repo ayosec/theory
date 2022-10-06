@@ -43,6 +43,19 @@ pub enum Error {
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
 pub struct PageId(NonZeroU32);
 
+impl From<PageId> for u32 {
+    fn from(id: PageId) -> u32 {
+        id.0.get()
+    }
+}
+
+impl PageId {
+    #[cfg(test)]
+    pub(crate) fn force_value(id: u32) -> PageId {
+        PageId(NonZeroU32::new(id).unwrap())
+    }
+}
+
 /// A single page in a book.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Page {

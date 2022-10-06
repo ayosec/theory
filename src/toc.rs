@@ -6,10 +6,15 @@ use std::io::{Read, Seek};
 use crate::page::{Index, PageId};
 use crate::persistence::datablock::DataBlocksReader;
 
+use tinyvec::{ArrayVec, TinyVec};
+
 /// Maximum subsections level when compute the TOC.
 ///
 /// Its main use is to avoid cyclic references.
 const MAX_SUB_LEVEL: usize = 32;
+
+/// List of section numbers to reference a page.
+type SectionNumbers = TinyVec<[u32; 4]>;
 
 /// Error raised when accessing the table of contents.
 #[derive(thiserror::Error, Debug)]
@@ -24,7 +29,7 @@ pub enum TocError {
     TitleError(crate::page::Error),
 
     #[error("Too many nested levels.")]
-    LevelLoop,
+    ParentLoop,
 }
 
 /// Entry in the TOC tree.
@@ -37,18 +42,18 @@ pub struct TocEntry {
     title: String,
 
     /// A list to describe the section number.
-    section_number: SectionNumbers,
+    section_numbers: SectionNumbers,
 
     /// Pages under this level.
     children: BTreeMap<PageId, TocEntry>,
 }
 
 impl TocEntry {
-    fn new(id: PageId, title: String, section_number: SectionNumbers) -> TocEntry {
+    fn new(id: PageId, title: String, section_numbers: SectionNumbers) -> TocEntry {
         TocEntry {
             id,
             title,
-            section_number,
+            section_numbers,
             children: BTreeMap::new(),
         }
     }
@@ -66,8 +71,8 @@ impl TocEntry {
     /// Section number of the page.
     ///
     /// The list includes the section numbers of the parents.
-    pub fn section_number(&self) -> &[u16] {
-        self.section_number.as_ref()
+    pub fn section_numbers(&self) -> &[u32] {
+        self.section_numbers.as_ref()
     }
 
     /// List of pages under this one.
@@ -103,20 +108,22 @@ impl BookToc {
 
             match parent_id {
                 None => {
-                    let section = tree.len() as u16 + 1;
+                    let section = tree.len() as u32 + 1;
                     tree.insert(
                         *id,
-                        TocEntry::new(*id, title, SectionNumbers::from([section])),
+                        TocEntry::new(*id, title, SectionNumbers::from(&[section][..])),
                     );
                 }
 
                 Some(parent_id) => {
                     // Compute the path using the cache in `parents`.
-                    let mut path = [None; MAX_SUB_LEVEL];
+                    let mut path = ArrayVec::<[_; MAX_SUB_LEVEL]>::new();
                     let mut last_id = parent_id;
 
-                    for slot in &mut path {
-                        *slot = Some(last_id);
+                    loop {
+                        if path.try_push(Some(last_id)).is_some() {
+                            return Err(TocError::ParentLoop);
+                        }
 
                         match parents.get(&last_id) {
                             Some(None) => break,
@@ -125,27 +132,18 @@ impl BookToc {
                         }
                     }
 
-                    // If the last item is filled, we don't know if the
-                    // hierarchy is completed, so we assume that the levels
-                    // are too deep.
-                    if path.last().map(|l| l.is_some()) == Some(true) {
-                        return Err(TocError::LevelLoop);
-                    }
-
-                    let target = path
-                        .into_iter()
-                        .rev()
-                        .skip_while(|item| item.is_none())
-                        .flatten()
-                        .try_fold((None, &mut tree), |(_, tree), id| {
+                    let target = path.into_iter().flatten().rev().try_fold(
+                        (None, &mut tree),
+                        |(_, tree), id| {
                             tree.get_mut(&id)
-                                .map(|t| (Some(&t.section_number), &mut t.children))
-                        });
+                                .map(|t| (Some(&t.section_numbers), &mut t.children))
+                        },
+                    );
 
                     match target {
                         Some((Some(section_number), target)) => {
                             let mut section_number = section_number.clone();
-                            section_number.push(target.len() as u16 + 1);
+                            section_number.push(target.len() as u32 + 1);
                             target.insert(*id, TocEntry::new(*id, title, section_number));
                         }
 
@@ -168,65 +166,9 @@ impl IntoIterator for BookToc {
     }
 }
 
-/// Container for the section numbers
-#[derive(Debug, Clone)]
-enum SectionNumbers {
-    Few { len: u8, numbers: [u16; 4] },
-
-    Many(Vec<u16>),
-}
-
-impl SectionNumbers {
-    fn new() -> Self {
-        SectionNumbers::Few {
-            len: 0,
-            numbers: [0; 4],
-        }
-    }
-
-    fn push(&mut self, number: u16) {
-        match self {
-            SectionNumbers::Few { len, numbers } => {
-                let pos = *len as usize;
-                if pos < numbers.len() {
-                    numbers[pos] = number;
-                    *len += 1;
-                } else {
-                    let mut vec = Vec::from(&numbers[..]);
-                    vec.push(number);
-                    *self = SectionNumbers::Many(vec);
-                }
-            }
-
-            SectionNumbers::Many(vec) => {
-                vec.push(number);
-            }
-        }
-    }
-}
-
-impl<T: IntoIterator<Item = u16>> From<T> for SectionNumbers {
-    fn from(numbers: T) -> SectionNumbers {
-        let mut sn = SectionNumbers::new();
-        for number in numbers {
-            sn.push(number);
-        }
-        sn
-    }
-}
-
-impl AsRef<[u16]> for SectionNumbers {
-    fn as_ref(&self) -> &[u16] {
-        match self {
-            SectionNumbers::Few { len, numbers } => &numbers[..*len as usize],
-            SectionNumbers::Many(vec) => &vec[..],
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-
+    use crate::page::PageId;
     use crate::Book;
     use std::io::Cursor;
 
@@ -256,7 +198,7 @@ mod tests {
                     item => {
                         assert_eq!(item.id(), $id);
                         assert_eq!(item.title(), $title);
-                        assert_eq!(item.section_number(), &$section);
+                        assert_eq!(item.section_numbers(), &$section);
                         item
                     }
                 }
@@ -276,17 +218,17 @@ mod tests {
     }
 
     #[test]
-    fn section_numbers() {
-        for max in 0..20 {
-            let mut sn = super::SectionNumbers::new();
-            let mut expected = vec![];
+    fn detect_loops() {
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut builder = Book::builder();
 
-            for n in 1..=max {
-                sn.push(n);
-                expected.push(n);
-            }
+        builder.new_page("A").set_parent(PageId::force_value(1));
 
-            assert_eq!(sn.as_ref(), &expected);
-        }
+        builder
+            .dump(Cursor::new(&mut buffer))
+            .expect("BookBuilder::dump");
+
+        let mut book = Book::load(Cursor::new(buffer)).unwrap();
+        assert!(matches!(book.toc(), Err(super::TocError::ParentLoop)));
     }
 }
