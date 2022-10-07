@@ -108,6 +108,14 @@ impl<S: Read + Seek> DataBlocksReader<S> {
                     deflater.finish()?;
                     data.shrink_to_fit()
                 }
+
+                #[cfg(feature = "lz4")]
+                BlockType::Lz4 => {
+                    data = Vec::with_capacity(len.next_power_of_two() as usize);
+                    let mut decoder = lz4_flex::frame::FrameDecoder::new(stream.take(len as u64));
+                    decoder.read_to_end(&mut data)?;
+                    data.shrink_to_fit()
+                }
             }
 
             Ok(data)

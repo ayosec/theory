@@ -23,6 +23,11 @@ struct Args {
     #[arg(short = 'z', long)]
     #[cfg(feature = "deflate")]
     deflate: bool,
+
+    /// Use LZ4 to compress data blocks.
+    #[arg(short, long)]
+    #[cfg(feature = "lz4")]
+    lz4: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,6 +38,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "deflate")]
     if args.deflate {
         book.set_compression(theory::BlockCompression::Deflate(9));
+    }
+
+    #[cfg(feature = "lz4")]
+    if args.lz4 {
+        book.set_compression(theory::BlockCompression::Lz4);
     }
 
     if let Some(title) = args.title.take() {

@@ -10,6 +10,9 @@ fn write_read() {
 
     #[cfg(feature = "deflate")]
     write_read_with_compression(BlockCompression::Deflate(6));
+
+    #[cfg(feature = "lz4")]
+    write_read_with_compression(BlockCompression::Lz4);
 }
 
 fn write_read_with_compression(compression: BlockCompression) {

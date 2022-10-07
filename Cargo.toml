@@ -15,6 +15,7 @@ endiannezz = "0.6.5"
 flate2 = { version = "1.0.24", optional = true }
 leb128 = "0.2.5"
 lru = { version = "0.8.1", default-features = false }
+lz4_flex = { version = "0.9.5", optional = true }
 num_enum = { version = "0.5.7", default-features = false }
 thiserror = "1.0.36"
 tinyvec = { version = "1.6.0", features = ["rustc_1_57", "alloc"] }
@@ -23,5 +24,6 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_57", "alloc"] }
 clap = { version = "4.0.10", default-features = false, features = ["derive", "std", "usage", "help"] }
 
 [features]
-default = ["deflate"]
+default = ["deflate", "lz4"]
 deflate = ["flate2"]
+lz4 = ["lz4_flex"]

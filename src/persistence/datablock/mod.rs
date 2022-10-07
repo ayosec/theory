@@ -22,6 +22,9 @@ enum BlockType {
 
     #[cfg(feature = "deflate")]
     Deflate = 2,
+
+    #[cfg(feature = "lz4")]
+    Lz4 = 3,
 }
 
 pub(crate) use reader::DataBlocksReader;
@@ -37,6 +40,10 @@ pub enum BlockCompression {
     /// Use DEFLATE, with the specified compression level (`0..=9`).
     #[cfg(feature = "deflate")]
     Deflate(u32),
+
+    /// Use LZ4.
+    #[cfg(feature = "lz4")]
+    Lz4,
 }
 
 impl BlockCompression {
@@ -46,6 +53,18 @@ impl BlockCompression {
 
             #[cfg(feature = "deflate")]
             BlockCompression::Deflate(_) => BlockType::Deflate,
+
+            #[cfg(feature = "lz4")]
+            BlockCompression::Lz4 => BlockType::Lz4,
         }
+    }
+}
+
+/// Convert an error from `lz4_flex` to `std::io::Error`.
+#[cfg(feature = "lz4")]
+fn map_lz4_err(e: lz4_flex::frame::Error) -> std::io::Error {
+    match e {
+        lz4_flex::frame::Error::IoError(e) => e,
+        other => std::io::Error::new(std::io::ErrorKind::Other, format!("LZ4: {}", other)),
     }
 }

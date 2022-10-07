@@ -9,7 +9,7 @@ use super::BlockCompression;
 use flate2::write::DeflateEncoder;
 
 /// Size of the data block.
-const MAX_DATA_BLOCK_SIZE: u64 = 32 * 1024;
+const MAX_DATA_BLOCK_SIZE: u64 = 64 * 1024;
 
 /// Target of data block data.
 enum Writer<S: Write> {
@@ -17,6 +17,9 @@ enum Writer<S: Write> {
 
     #[cfg(feature = "deflate")]
     Deflate(DeflateEncoder<S>),
+
+    #[cfg(feature = "lz4")]
+    Lz4(lz4_flex::frame::FrameEncoder<S>),
 }
 
 impl<W: Write> Writer<W> {
@@ -25,7 +28,10 @@ impl<W: Write> Writer<W> {
             Writer::Raw(r) => Ok(r),
 
             #[cfg(feature = "deflate")]
-            Writer::Deflate(d) => d.flush_finish(),
+            Writer::Deflate(d) => d.finish(),
+
+            #[cfg(feature = "lz4")]
+            Writer::Lz4(l) => l.finish().map_err(super::map_lz4_err),
         }
     }
 
@@ -35,18 +41,9 @@ impl<W: Write> Writer<W> {
 
             #[cfg(feature = "deflate")]
             Writer::Deflate(d) => d,
-        }
-    }
 
-    fn bytes_out(&mut self) -> io::Result<Option<u64>> {
-        match self {
-            Writer::Raw(_) => Ok(None),
-
-            #[cfg(feature = "deflate")]
-            Writer::Deflate(d) => {
-                d.try_finish()?;
-                Ok(Some(d.total_out()))
-            }
+            #[cfg(feature = "lz4")]
+            Writer::Lz4(l) => l,
         }
     }
 }
@@ -81,22 +78,21 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
 
     /// Closed the active block and move the writer to `Wait` state.
     fn close_current(&mut self) -> io::Result<()> {
-        let (mut stream, len, block_id) = match mem::replace(&mut self.state, BlockState::Invalid) {
-            BlockState::Wait(stream) => (stream, 0, 0),
+        let (mut stream, block_id) = match mem::replace(&mut self.state, BlockState::Invalid) {
+            BlockState::Wait(stream) => (stream, !0),
 
             BlockState::Active {
-                mut writer,
-                offset,
-                block_id,
-            } => {
-                let len = writer.bytes_out()?.unwrap_or(offset);
-                (writer.into_stream()?, len, block_id)
-            }
+                writer, block_id, ..
+            } => (writer.into_stream()?, block_id),
 
             BlockState::Invalid => unreachable!(),
         };
 
-        // Write the block length (as u32, big-endian) after the tag.
+        // Compute how bytes have been written to the stream and update the
+        // block length (4 bytes, big-endian) at the beginning of it.
+        let current_position = stream.stream_position()?;
+        let len = current_position - (block_id + /* tag */ 1 + /* length */ 4);
+
         if len > 0 {
             let len_bytes = u32::try_from(len)
                 .map_err(|_| {
@@ -104,10 +100,9 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
                 })?
                 .to_be_bytes();
 
-            let current = stream.stream_position()?;
             stream.seek(SeekFrom::Start(block_id + 1))?;
             stream.write_all(&len_bytes)?;
-            stream.seek(SeekFrom::Start(current))?;
+            stream.seek(SeekFrom::Start(current_position))?;
         }
 
         self.state = BlockState::Wait(stream);
@@ -148,10 +143,17 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
                         BlockCompression::None => Writer::Raw(stream),
 
                         #[cfg(feature = "deflate")]
-                        BlockCompression::Deflate(level) => Writer::Deflate(DeflateEncoder::new(
-                            stream,
-                            flate2::Compression::new(level),
-                        )),
+                        BlockCompression::Deflate(level) => {
+                            let encoder =
+                                DeflateEncoder::new(stream, flate2::Compression::new(level));
+                            Writer::Deflate(encoder)
+                        }
+
+                        #[cfg(feature = "lz4")]
+                        BlockCompression::Lz4 => {
+                            let encoder = lz4_flex::frame::FrameEncoder::new(stream);
+                            Writer::Lz4(encoder)
+                        }
                     };
 
                     self.state = BlockState::Active {

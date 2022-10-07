@@ -5,4 +5,4 @@
 * Binary format to store books in a file.
 * `Book::toc()` returns a tree of table of contents.
 * Both `Page` and `Book` can include any number of metadata entries.
-* Compress data blocks with DEFLATE.
+* Add block compression with LZ4 and DEFLATE.
