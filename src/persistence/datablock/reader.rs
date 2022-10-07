@@ -58,12 +58,14 @@ impl<S: Read + Seek> DataBlocksReader<S> {
             )
         })?;
 
+        let stream = &mut self.stream;
+
         let result = self.cache.get_or_insert(block_id, || {
-            self.stream.seek(SeekFrom::Start(block_id))?;
+            stream.seek(SeekFrom::Start(block_id))?;
 
             // Block type.
             let mut byte_tag = [0];
-            self.stream.read_exact(&mut byte_tag)?;
+            stream.read_exact(&mut byte_tag)?;
 
             let block_type = BlockType::try_from(byte_tag[0])
                 .map_err(|_| io::Error::new(io::ErrorKind::Other, "Invalid block type"))?;
@@ -72,7 +74,7 @@ impl<S: Read + Seek> DataBlocksReader<S> {
             //
             // Return an error if the length is beyond the end of the input.
             let mut len = [0; 4];
-            self.stream.read_exact(&mut len)?;
+            stream.read_exact(&mut len)?;
             let len = u32::from_be_bytes(len);
 
             if offset > len as usize {
@@ -95,7 +97,16 @@ impl<S: Read + Seek> DataBlocksReader<S> {
             match block_type {
                 BlockType::Uncompressed => {
                     data = vec![0; len as usize];
-                    self.stream.read_exact(&mut data)?;
+                    stream.read_exact(&mut data)?;
+                }
+
+                #[cfg(feature = "deflate")]
+                BlockType::Deflate => {
+                    data = Vec::with_capacity(len.next_power_of_two() as usize);
+                    let mut deflater = flate2::write::DeflateDecoder::new(&mut data);
+                    io::copy(&mut stream.take(len as u64), &mut deflater)?;
+                    deflater.finish()?;
+                    data.shrink_to_fit()
                 }
             }
 

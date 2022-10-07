@@ -3,9 +3,8 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use super::Error;
-use crate::builder::BookBuilder;
 use crate::persistence::datablock::DataBlocksReader;
-use crate::{metadata, page, Book};
+use crate::{metadata, page, BlockCompression, Book, MetadataEntry, Page};
 
 use endiannezz::Io;
 
@@ -45,7 +44,12 @@ where
     Ok(book)
 }
 
-pub(super) fn dump<O>(mut output: O, book: &BookBuilder) -> Result<(), Error>
+pub(super) fn dump<O>(
+    mut output: O,
+    pages: &[Page],
+    metadata: &[MetadataEntry],
+    compression: BlockCompression,
+) -> Result<(), Error>
 where
     O: Write + Seek,
 {
@@ -56,7 +60,7 @@ where
     }
 
     let mut header = Header {
-        num_pages: to_u32!(book.pages.len()),
+        num_pages: to_u32!(pages.len()),
         metadata_pos: !0,
         pages_pos: !0,
         fts_pos: !0,
@@ -72,10 +76,10 @@ where
 
     // The metadata table.
     header.metadata_pos = to_u32!(output.stream_position()? - beginning);
-    metadata::dump(&mut output, &book.metadata)?;
+    metadata::dump(&mut output, metadata)?;
 
     // The pages table.
-    let page_pos = page::persistence::dump_pages(&mut output, &book.pages)?;
+    let page_pos = page::persistence::dump_pages(&mut output, pages.iter(), compression)?;
     header.pages_pos = to_u32!(page_pos - beginning);
 
     // TODO Write a table for the FTS index.

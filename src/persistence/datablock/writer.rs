@@ -3,33 +3,79 @@
 use std::io::{self, Seek, SeekFrom, Write};
 use std::mem;
 
-use super::BlockType;
+use super::BlockCompression;
+
+#[cfg(feature = "deflate")]
+use flate2::write::DeflateEncoder;
 
 /// Size of the data block.
 const MAX_DATA_BLOCK_SIZE: u64 = 32 * 1024;
 
+/// Target of data block data.
+enum Writer<S: Write> {
+    Raw(S),
+
+    #[cfg(feature = "deflate")]
+    Deflate(DeflateEncoder<S>),
+}
+
+impl<W: Write> Writer<W> {
+    fn into_stream(self) -> io::Result<W> {
+        match self {
+            Writer::Raw(r) => Ok(r),
+
+            #[cfg(feature = "deflate")]
+            Writer::Deflate(d) => d.flush_finish(),
+        }
+    }
+
+    fn get_stream(&mut self) -> &mut dyn Write {
+        match self {
+            Writer::Raw(r) => r,
+
+            #[cfg(feature = "deflate")]
+            Writer::Deflate(d) => d,
+        }
+    }
+
+    fn bytes_out(&mut self) -> io::Result<Option<u64>> {
+        match self {
+            Writer::Raw(_) => Ok(None),
+
+            #[cfg(feature = "deflate")]
+            Writer::Deflate(d) => {
+                d.try_finish()?;
+                Ok(Some(d.total_out()))
+            }
+        }
+    }
+}
+
 /// Track the active block.
-enum BlockState<S> {
+enum BlockState<S: Write> {
     Invalid,
 
     Wait(S),
 
-    Uncompressed {
-        stream: S,
+    Active {
+        writer: Writer<S>,
         block_id: u64,
         offset: u64,
     },
 }
 
 /// Data blocks generator.
-pub(crate) struct DataBlocksWriter<S> {
+pub(crate) struct DataBlocksWriter<S: Write> {
     state: BlockState<S>,
+
+    compression: BlockCompression,
 }
 
 impl<S: Write + Seek> DataBlocksWriter<S> {
-    pub(crate) fn new(stream: S) -> Self {
+    pub(crate) fn new(stream: S, compression: BlockCompression) -> Self {
         DataBlocksWriter {
             state: BlockState::Wait(stream),
+            compression,
         }
     }
 
@@ -38,11 +84,14 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
         let (mut stream, len, block_id) = match mem::replace(&mut self.state, BlockState::Invalid) {
             BlockState::Wait(stream) => (stream, 0, 0),
 
-            BlockState::Uncompressed {
-                stream,
+            BlockState::Active {
+                mut writer,
                 offset,
                 block_id,
-            } => (stream, offset, block_id),
+            } => {
+                let len = writer.bytes_out()?.unwrap_or(offset);
+                (writer.into_stream()?, len, block_id)
+            }
 
             BlockState::Invalid => unreachable!(),
         };
@@ -73,9 +122,9 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
     ///
     /// `size_hint` is used to determine if a new block should be created to
     /// store the data.
-    pub(crate) fn fragment(&mut self, size_hint: u64) -> io::Result<Fragment<impl Write + Seek>> {
+    pub(crate) fn fragment(&mut self, size_hint: u64) -> io::Result<Fragment<impl Write + '_>> {
         let current_offset = match &self.state {
-            BlockState::Uncompressed { offset, .. } => *offset,
+            BlockState::Active { offset, .. } => *offset,
             _ => 0,
         };
 
@@ -85,7 +134,7 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
             self.close_current()?;
         }
 
-        // Change to `Uncompressed` state if it is waiting.
+        // Change to `Active` state if it is waiting.
         //
         // Every block starts with the byte-tag, and the length (u32).
         if let BlockState::Wait(_) = self.state {
@@ -93,10 +142,20 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
                 BlockState::Wait(mut stream) => {
                     let block_id = stream.stream_position()?;
 
-                    stream.write_all(&[BlockType::Uncompressed as u8, 0, 0, 0, 0])?;
+                    stream.write_all(&[self.compression.tag() as u8, 0, 0, 0, 0])?;
 
-                    self.state = BlockState::Uncompressed {
-                        stream,
+                    let writer = match self.compression {
+                        BlockCompression::None => Writer::Raw(stream),
+
+                        #[cfg(feature = "deflate")]
+                        BlockCompression::Deflate(level) => Writer::Deflate(DeflateEncoder::new(
+                            stream,
+                            flate2::Compression::new(level),
+                        )),
+                    };
+
+                    self.state = BlockState::Active {
+                        writer,
                         block_id,
                         offset: 0,
                     };
@@ -108,14 +167,14 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
 
         // Extract data from the state.
         match &mut self.state {
-            BlockState::Uncompressed {
-                stream,
+            BlockState::Active {
+                writer,
                 block_id,
                 offset,
             } => {
                 let offset_copy = *offset;
                 let fragment = Fragment {
-                    writer: stream,
+                    writer: writer.get_stream(),
                     writer_offset: offset,
                     block_id: *block_id,
                     offset: offset_copy,
@@ -143,7 +202,7 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
 /// [`DataBlocksWriter::data`] function, and can be used to add
 /// data to the data block.
 pub(crate) struct Fragment<'a, S> {
-    writer: &'a mut S,
+    writer: S,
 
     writer_offset: &'a mut u64,
 
@@ -152,15 +211,19 @@ pub(crate) struct Fragment<'a, S> {
     offset: u64,
 }
 
-impl<S: Write + Seek> Fragment<'_, S> {
-    /// Return the identifier of the data block that contains this fragment.
-    pub(crate) fn block_id(&self) -> u64 {
-        self.block_id
-    }
+/// Location to get a fragment.
+pub(crate) struct FragmentLocation {
+    pub(crate) block_id: u64,
+    pub(crate) offset: u64,
+}
 
-    /// Return the offset inside the data block of the start of this fragment.
-    pub(crate) fn offset(&self) -> u64 {
-        self.offset
+impl<S> Fragment<'_, S> {
+    /// Finish this fragment and returns its location.
+    pub(crate) fn location(self) -> FragmentLocation {
+        FragmentLocation {
+            block_id: self.block_id,
+            offset: self.offset,
+        }
     }
 }
 

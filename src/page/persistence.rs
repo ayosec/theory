@@ -23,7 +23,7 @@ use std::io::{self, Cursor, Read, Seek, Write};
 use std::num::NonZeroU32;
 
 use crate::persistence::datablock::{DataBlocksReader, DataBlocksWriter};
-use crate::{metadata, page, MetadataEntry, Page};
+use crate::{metadata, page, BlockCompression, MetadataEntry, Page};
 
 use endiannezz::Io;
 
@@ -101,7 +101,11 @@ impl IndexEntry {
 /// Write the page table and the data block in the output stream.
 ///
 /// On success, returns the offset to the page index.
-pub(crate) fn dump_pages<'a, O, P, I>(output: O, pages: I) -> io::Result<u64>
+pub(crate) fn dump_pages<'a, O, P, I>(
+    output: O,
+    pages: I,
+    compression: BlockCompression,
+) -> io::Result<u64>
 where
     O: Write + Seek,
     P: Into<&'a Page>,
@@ -117,7 +121,7 @@ where
     let mut metadata_buf = Vec::with_capacity(4 * 1024);
     let mut page_index = Vec::with_capacity(pages.size_hint().0);
 
-    let mut db_writer = DataBlocksWriter::new(output);
+    let mut db_writer = DataBlocksWriter::new(output, compression);
 
     for page in pages.map(|e| e.into()) {
         // Content is written directly to the output stream.
@@ -126,9 +130,10 @@ where
 
         leb128::write::unsigned(&mut fragment, content.len() as u64)?;
         fragment.write_all(content)?;
+        let loc = fragment.location();
 
-        let content_block_id = to_u32!(fragment.block_id());
-        let content_block_offset = to_u32!(fragment.offset());
+        let content_block_id = to_u32!(loc.block_id);
+        let content_block_offset = to_u32!(loc.offset);
 
         // Metadata
         let metadata_block_offset = to_u32!(metadata_buf.len());
@@ -150,8 +155,9 @@ where
     // Send the metadata to the output.
     let mut fragment_metadata = db_writer.fragment(u64::MAX)?;
     fragment_metadata.write_all(&metadata_buf)?;
+    let loc = fragment_metadata.location();
 
-    let metadata_block_id = to_u32!(fragment_metadata.block_id());
+    let metadata_block_id = to_u32!(loc.block_id);
 
     let mut output = db_writer.finish()?;
 

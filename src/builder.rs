@@ -5,7 +5,7 @@ use std::io::{BufWriter, Seek, Write};
 use std::num::NonZeroU32;
 use std::path::Path;
 
-use crate::{persistence, MetadataEntry, Page};
+use crate::{persistence, BlockCompression, MetadataEntry, Page};
 
 /// A builder for new books.
 ///
@@ -35,9 +35,11 @@ use crate::{persistence, MetadataEntry, Page};
 pub struct BookBuilder {
     next_page_id: NonZeroU32,
 
-    pub(crate) metadata: Vec<MetadataEntry>,
+    metadata: Vec<MetadataEntry>,
 
-    pub(crate) pages: Vec<Page>,
+    pages: Vec<Page>,
+
+    compression: BlockCompression,
 }
 
 impl BookBuilder {
@@ -47,7 +49,14 @@ impl BookBuilder {
             next_page_id: NonZeroU32::new(1).unwrap(),
             metadata: Vec::new(),
             pages: Vec::new(),
+            compression: Default::default(),
         }
+    }
+
+    /// Set the compression method to store data in each block.
+    pub fn set_compression(&mut self, compression: BlockCompression) -> &mut BookBuilder {
+        self.compression = compression;
+        self
     }
 
     /// Add a new metadata entry.
@@ -81,13 +90,13 @@ impl BookBuilder {
     where
         O: Write + Seek,
     {
-        persistence::dump(output, self)
+        persistence::dump(output, &self.pages, &self.metadata, self.compression)
     }
 
     /// Dump this page to the specified file.
     ///
     /// See [`dump`](Self::dump) for more details.
     pub fn dump_to_file(&self, path: impl AsRef<Path>) -> Result<(), persistence::Error> {
-        persistence::dump(BufWriter::new(File::create(path)?), self)
+        self.dump(BufWriter::new(File::create(path)?))
     }
 }

@@ -19,6 +19,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
 
       - run: cargo test --all-features
+      - run: cargo test --no-default-features
 
       - run: rustup component add clippy
       - run: cargo clippy --all-targets

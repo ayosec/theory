@@ -18,12 +18,22 @@ struct Args {
 
     /// Files to include in the book.
     pages: Vec<PathBuf>,
+
+    /// Use DEFLATE to compress data blocks.
+    #[arg(short = 'z', long)]
+    #[cfg(feature = "deflate")]
+    deflate: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Args::parse();
 
     let mut book = theory::Book::builder();
+
+    #[cfg(feature = "deflate")]
+    if args.deflate {
+        book.set_compression(theory::BlockCompression::Deflate(9));
+    }
 
     if let Some(title) = args.title.take() {
         book.add_metadata(theory::MetadataEntry::Title(title));

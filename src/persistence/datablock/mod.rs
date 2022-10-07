@@ -19,7 +19,33 @@ mod tests;
 #[repr(u8)]
 enum BlockType {
     Uncompressed = 1,
+
+    #[cfg(feature = "deflate")]
+    Deflate = 2,
 }
 
 pub(crate) use reader::DataBlocksReader;
 pub(crate) use writer::DataBlocksWriter;
+
+/// Method to compress data in blocks.
+#[derive(Default, Clone, Copy, Debug)]
+pub enum BlockCompression {
+    /// Don't compress data.
+    #[default]
+    None,
+
+    /// Use DEFLATE, with the specified compression level (`0..=9`).
+    #[cfg(feature = "deflate")]
+    Deflate(u32),
+}
+
+impl BlockCompression {
+    fn tag(&self) -> BlockType {
+        match self {
+            BlockCompression::None => BlockType::Uncompressed,
+
+            #[cfg(feature = "deflate")]
+            BlockCompression::Deflate(_) => BlockType::Deflate,
+        }
+    }
+}

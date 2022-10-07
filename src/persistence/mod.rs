@@ -2,7 +2,7 @@
 
 use std::io::{self, Read, Seek, Write};
 
-use crate::builder::BookBuilder;
+use crate::{BlockCompression, MetadataEntry, Page};
 
 mod v1;
 
@@ -51,9 +51,14 @@ where
 }
 
 /// Dump the content of the book in the output stream.
-pub(crate) fn dump<O>(output: O, book: &BookBuilder) -> Result<(), Error>
+pub(crate) fn dump<O>(
+    output: O,
+    pages: &[Page],
+    metadata: &[MetadataEntry],
+    compression: BlockCompression,
+) -> Result<(), Error>
 where
     O: Write + Seek,
 {
-    v1::dump(output, book)
+    v1::dump(output, pages, metadata, compression)
 }

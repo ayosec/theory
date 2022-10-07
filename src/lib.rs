@@ -15,5 +15,6 @@ pub use builder::BookBuilder;
 pub use metadata::MetadataEntry;
 pub use page::Error as PageError;
 pub use page::Page;
+pub use persistence::datablock::BlockCompression;
 pub use persistence::Error as PersistenceError;
 pub use toc::TocEntry;
