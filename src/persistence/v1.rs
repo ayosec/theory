@@ -2,7 +2,7 @@
 
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use super::Error;
+use super::PersistenceError;
 use crate::persistence::datablock::DataBlocksReader;
 use crate::{metadata, page, BlockCompression, Book, MetadataEntry, Page};
 
@@ -25,7 +25,7 @@ struct Header {
     fts_pos: u32,
 }
 
-pub(super) fn load<I>(mut input: I) -> Result<crate::Book<I>, Error>
+pub(super) fn load<I>(mut input: I) -> Result<crate::Book<I>, PersistenceError>
 where
     I: Read + Seek,
 {
@@ -49,13 +49,13 @@ pub(super) fn dump<O>(
     pages: &[Page],
     metadata: &[MetadataEntry],
     compression: BlockCompression,
-) -> Result<(), Error>
+) -> Result<(), PersistenceError>
 where
     O: Write + Seek,
 {
     macro_rules! to_u32 {
         ($v:expr) => {
-            u32::try_from($v).map_err(|_| Error::TooManyPages)?
+            u32::try_from($v).map_err(|_| PersistenceError::TooManyPages)?
         };
     }
 

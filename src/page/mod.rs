@@ -16,7 +16,7 @@ use endiannezz::Io;
 /// Errors related to page serialization.
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
-pub enum Error {
+pub enum PageError {
     #[error("I/O error: {0}.")]
     Io(#[from] std::io::Error),
 
@@ -124,7 +124,7 @@ pub(crate) struct Index {
 
 impl Index {
     /// Load the page entries located at `position`.
-    pub(crate) fn new<R>(mut input: R, num_pages: usize, position: u64) -> Result<Self, Error>
+    pub(crate) fn new<R>(mut input: R, num_pages: usize, position: u64) -> Result<Self, PageError>
     where
         R: Read + Seek,
     {
@@ -136,11 +136,11 @@ impl Index {
 
             let page_id = match NonZeroU32::new(ie.id) {
                 Some(id) => id,
-                None => return Err(Error::InvalidId(ie.id)),
+                None => return Err(PageError::InvalidId(ie.id)),
             };
 
             if entries.insert(PageId(page_id), ie).is_some() {
-                return Err(Error::DuplicatedId(page_id.get()));
+                return Err(PageError::DuplicatedId(page_id.get()));
             }
         }
 
@@ -151,7 +151,7 @@ impl Index {
     pub(crate) fn pages_iter<'a, R>(
         &'a self,
         db_reader: &'a mut DataBlocksReader<R>,
-    ) -> impl Iterator<Item = Result<Page, Error>> + 'a
+    ) -> impl Iterator<Item = Result<Page, PageError>> + 'a
     where
         R: Read + Seek + 'a,
     {
@@ -165,13 +165,13 @@ impl Index {
         &mut self,
         db_reader: &mut DataBlocksReader<R>,
         page_id: PageId,
-    ) -> Result<Page, Error>
+    ) -> Result<Page, PageError>
     where
         R: Read + Seek,
     {
         let entry = match self.entries.get(&page_id) {
             Some(e) => e,
-            None => return Err(Error::InvalidId(page_id.0.get())),
+            None => return Err(PageError::InvalidId(page_id.0.get())),
         };
 
         persistence::build_page(entry, db_reader)

@@ -5,6 +5,7 @@ use std::io::{BufWriter, Seek, Write};
 use std::num::NonZeroU32;
 use std::path::Path;
 
+use crate::persistence::PersistenceError;
 use crate::{persistence, BlockCompression, MetadataEntry, Page};
 
 /// A builder for new books.
@@ -12,26 +13,7 @@ use crate::{persistence, BlockCompression, MetadataEntry, Page};
 /// The pages are kept in memory, and then they can be stored with
 /// [`BookBuilder::dump()`].
 ///
-/// # Example
-///
-/// ```
-/// use theory::{MetadataEntry, Book, Page};
-/// use std::io::{Cursor, Read, Write};
-///
-/// let mut buffer: Vec<u8> = Vec::new();
-///
-/// let mut builder = Book::builder();
-/// builder.new_page("First").set_content("1");
-/// builder.new_page("Second").set_content("2");
-///
-/// builder
-///     .add_metadata(MetadataEntry::Title("Theory Example".into()))
-///     .dump(Cursor::new(&mut buffer));
-///
-/// let book = Book::load(Cursor::new(buffer)).unwrap();
-///
-/// assert_eq!(book.num_pages(), 2);
-/// ```
+/// See the [crate documentation](crate) for an example of [`BookBuilder`].
 pub struct BookBuilder {
     next_page_id: NonZeroU32,
 
@@ -71,11 +53,8 @@ impl BookBuilder {
     /// Create a new page with a title. The content of the page is set using the
     /// mutable reference returned by this function.
     ///
-    /// Its content can be set with the [`set_keywords`], [`description`], and
-    /// [`set_content`] functions.
+    /// Its content can be set with the [`set_content`] function.
     ///
-    /// [`set_keywords`]: Page::set_keywords
-    /// [`description`]: Page::set_description
     /// [`set_content`]: Page::set_content
     pub fn new_page(&mut self, title: impl Into<String>) -> &mut Page {
         let page = Page::new(title.into(), self.next_page_id);
@@ -86,7 +65,7 @@ impl BookBuilder {
 
     /// Dump this book to the specified stream. The written data can be
     /// loaded with [`load`](crate::Book::load).
-    pub fn dump<O>(&self, output: O) -> Result<(), persistence::Error>
+    pub fn dump<O>(&self, output: O) -> Result<(), PersistenceError>
     where
         O: Write + Seek,
     {
@@ -96,7 +75,7 @@ impl BookBuilder {
     /// Dump this page to the specified file.
     ///
     /// See [`dump`](Self::dump) for more details.
-    pub fn dump_to_file(&self, path: impl AsRef<Path>) -> Result<(), persistence::Error> {
+    pub fn dump_to_file(&self, path: impl AsRef<Path>) -> Result<(), PersistenceError> {
         self.dump(BufWriter::new(File::create(path)?))
     }
 }

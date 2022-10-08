@@ -39,10 +39,12 @@ pub enum BlockCompression {
 
     /// Use DEFLATE, with the specified compression level (`0..=9`).
     #[cfg(feature = "deflate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "deflate")))]
     Deflate(u32),
 
     /// Use LZ4.
     #[cfg(feature = "lz4")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "lz4")))]
     Lz4,
 }
 

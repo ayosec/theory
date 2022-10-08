@@ -19,7 +19,7 @@ enum Writer<S: Write> {
     Deflate(DeflateEncoder<S>),
 
     #[cfg(feature = "lz4")]
-    Lz4(lz4_flex::frame::FrameEncoder<S>),
+    Lz4(Box<lz4_flex::frame::FrameEncoder<S>>),
 }
 
 impl<W: Write> Writer<W> {
@@ -152,7 +152,7 @@ impl<S: Write + Seek> DataBlocksWriter<S> {
                         #[cfg(feature = "lz4")]
                         BlockCompression::Lz4 => {
                             let encoder = lz4_flex::frame::FrameEncoder::new(stream);
-                            Writer::Lz4(encoder)
+                            Writer::Lz4(Box::new(encoder))
                         }
                     };
 

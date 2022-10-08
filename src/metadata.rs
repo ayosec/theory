@@ -23,19 +23,24 @@ use std::io::{self, Read, Write};
 
 /// Errors related to serialize operations.
 #[derive(thiserror::Error, Debug)]
-pub enum LoadError {
+pub enum MetadataError {
+    /// The byte sequence did not contain valid Unicode data.
     #[error("Invalid UTF-8 sequence.")]
     UnicodeError(#[from] std::string::FromUtf8Error),
 
+    /// Failed to get data from the input.
     #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
 
+    /// Failed to decode a LEB128-encoded number.
     #[error("Failed to read a LEB128 integer: {0}.")]
     Leb128Error(#[from] leb128::read::Error),
 
+    /// A length value read from the input is not valid.
     #[error("Invalid length: {0}.")]
     InvalidLength(u64),
 
+    /// Unknown byte tag for a metadata entry.
     #[error("Invalid tag.")]
     InvalidByteTag(u8),
 }
@@ -56,7 +61,46 @@ pub(crate) enum ByteTag {
     User = 100,
 }
 
-/// Metadata associated to a book.
+/// Metadata associated to a [book](crate::Book) or a [page](crate::Page).
+///
+/// # Adding Metadata Entries
+///
+/// Entries can be added with the `add_metadata` function of each type.
+///
+/// ```rust
+/// use theory::{Book, MetadataEntry::{Keyword, Title}};
+///
+/// let mut builder = Book::builder();
+/// builder.add_metadata(Title("The Book".into()));
+///
+/// builder
+///     .new_page("Introduction")
+///     .add_metadata(Keyword("intro".into()));
+/// ```
+///
+/// # Reading Metadata Entries
+///
+/// Both [`Book`](crate::Book) and [`Page`](crate::Page) provide a `metadata`
+/// function to get all entries associated with the item.
+///
+/// For example, to get the title of a book:
+///
+/// ```
+/// use std::io::{Read, Seek};
+/// use theory::{Book, MetadataEntry::Title, errors::MetadataError};
+///
+/// fn book_title<T>(book: &mut Book<T>) -> Result<Option<String>, MetadataError>
+/// where
+///     T: Read + Seek,
+/// {
+///     for entry in book.metadata()? {
+///         if let Title(t) = entry? {
+///             return Ok(Some(t));
+///         }
+///     }
+///
+///     Ok(None)
+/// }
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[non_exhaustive]
 pub enum MetadataEntry {
@@ -112,7 +156,7 @@ where
 pub(crate) fn load<I>(
     input: I,
     input_len: u64,
-) -> impl Iterator<Item = Result<MetadataEntry, LoadError>>
+) -> impl Iterator<Item = Result<MetadataEntry, MetadataError>>
 where
     I: Read,
 {
@@ -130,7 +174,7 @@ struct BinaryDataParser<I> {
 }
 
 impl<I: Read> Iterator for BinaryDataParser<I> {
-    type Item = Result<MetadataEntry, LoadError>;
+    type Item = Result<MetadataEntry, MetadataError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.io_valid {
@@ -156,16 +200,16 @@ impl<I: Read> Iterator for BinaryDataParser<I> {
             return None;
         }
 
-        let key = run!(
-            ByteTag::try_from(byte_tag[0]).map_err(|_| LoadError::InvalidByteTag(byte_tag[0]))
-        );
+        let key =
+            run!(ByteTag::try_from(byte_tag[0])
+                .map_err(|_| MetadataError::InvalidByteTag(byte_tag[0])));
 
         macro_rules! next_value {
             () => {{
                 let value_len = run!(leb128::read::unsigned(&mut self.input));
                 if value_len > self.input_len {
                     self.io_valid = false;
-                    return Some(Err(LoadError::InvalidLength(value_len)));
+                    return Some(Err(MetadataError::InvalidLength(value_len)));
                 }
 
                 let mut value_bytes = vec![0; value_len as usize];
@@ -177,7 +221,7 @@ impl<I: Read> Iterator for BinaryDataParser<I> {
 
         macro_rules! next_str {
             () => {
-                run!(String::from_utf8(next_value!()).map_err(LoadError::UnicodeError))
+                run!(String::from_utf8(next_value!()).map_err(MetadataError::UnicodeError))
             };
         }
 
@@ -192,7 +236,7 @@ impl<I: Read> Iterator for BinaryDataParser<I> {
             ByteTag::Date => next_value!()
                 .try_into()
                 .map(|b| MetadataEntry::Date(u64::from_be_bytes(b)))
-                .map_err(|e| LoadError::InvalidLength(e.len() as u64)),
+                .map_err(|e| MetadataError::InvalidLength(e.len() as u64)),
         };
 
         Some(item)

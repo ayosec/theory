@@ -11,7 +11,7 @@ pub(crate) mod datablock;
 /// Errors related to persistence operations.
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
-pub enum Error {
+pub enum PersistenceError {
     #[error("I/O error: {0}.")]
     Io(#[from] io::Error),
 
@@ -25,7 +25,7 @@ pub enum Error {
     TooManyPages,
 
     #[error("Unable to load page index.")]
-    PageError(#[from] crate::page::Error),
+    PageError(#[from] crate::page::PageError),
 }
 
 /// Expected size for magic numbers.
@@ -34,19 +34,19 @@ const MAGIC_SIZE: usize = 8;
 /// Load a book from an input, like a file or a byte array.
 ///
 /// The input is expected to be generated  by the [`dump`] function.
-pub(crate) fn load<I>(mut input: I) -> Result<crate::Book<I>, Error>
+pub(crate) fn load<I>(mut input: I) -> Result<crate::Book<I>, PersistenceError>
 where
     I: Read + Seek,
 {
     let mut magic = [0; MAGIC_SIZE];
     input
         .read_exact(&mut magic)
-        .map_err(|_| Error::InvalidMagic)?;
+        .map_err(|_| PersistenceError::InvalidMagic)?;
 
     match &magic {
         v1::MAGIC => v1::load(input),
 
-        _ => Err(Error::InvalidMagic),
+        _ => Err(PersistenceError::InvalidMagic),
     }
 }
 
@@ -56,7 +56,7 @@ pub(crate) fn dump<O>(
     pages: &[Page],
     metadata: &[MetadataEntry],
     compression: BlockCompression,
-) -> Result<(), Error>
+) -> Result<(), PersistenceError>
 where
     O: Write + Seek,
 {

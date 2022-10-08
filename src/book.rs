@@ -3,18 +3,11 @@
 use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::builder::BookBuilder;
+use crate::errors::MetadataError;
 use crate::persistence::datablock::DataBlocksReader;
 use crate::{metadata, page, persistence, toc, MetadataEntry};
 
 /// A book loaded from an input stream, like a file.
-///
-/// # Creating a New Book
-///
-/// TODO
-///
-/// # Loading a Book
-///
-/// TODO
 pub struct Book<I> {
     /// Data blocks in the input stream.
     pub(crate) data_blocks: DataBlocksReader<I>,
@@ -39,7 +32,7 @@ impl Book<()> {
 
 impl<I: Read + Seek> Book<I> {
     /// Load book from a stream, serialized with [`BookBuilder::dump()`].
-    pub fn load(input: I) -> Result<Self, persistence::Error> {
+    pub fn load(input: I) -> Result<Self, persistence::PersistenceError> {
         persistence::load(input)
     }
 
@@ -51,7 +44,7 @@ impl<I: Read + Seek> Book<I> {
     /// Return an iterator to get all metadata entries in the book.
     pub fn metadata(
         &mut self,
-    ) -> io::Result<impl Iterator<Item = Result<MetadataEntry, impl std::error::Error>> + '_> {
+    ) -> io::Result<impl Iterator<Item = Result<MetadataEntry, MetadataError>> + '_> {
         let input_len = self.data_blocks.input_stream_len();
         let input = self.data_blocks.input_stream();
         input.seek(SeekFrom::Start(self.metadata_pos as u64))?;
@@ -59,12 +52,12 @@ impl<I: Read + Seek> Book<I> {
     }
 
     /// Return an iterator to get all pages in the book.
-    pub fn pages(&mut self) -> impl Iterator<Item = Result<page::Page, page::Error>> + '_ {
+    pub fn pages(&mut self) -> impl Iterator<Item = Result<page::Page, page::PageError>> + '_ {
         self.page_index.pages_iter(&mut self.data_blocks)
     }
 
     /// Return a single page by its identifier.
-    pub fn get_page_by_id(&mut self, page_id: page::PageId) -> Result<page::Page, page::Error> {
+    pub fn get_page_by_id(&mut self, page_id: page::PageId) -> Result<page::Page, page::PageError> {
         self.page_index.get_by_id(&mut self.data_blocks, page_id)
     }
 

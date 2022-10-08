@@ -26,7 +26,7 @@ pub enum TocError {
     Io(#[from] std::io::Error),
 
     #[error("Failed to get title: {0}.")]
-    TitleError(crate::page::Error),
+    TitleError(crate::page::PageError),
 
     #[error("Too many nested levels.")]
     ParentLoop,

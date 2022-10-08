@@ -4,7 +4,7 @@
 //!
 //! Pages are stored in two parts: an index and a collection of *data blocks*.
 //!
-//! The data stored at the [`pages_pos`] position in the stream in the page
+//! The data stored at the `pages_pos` position in the stream in the page
 //! index. Each entry is composed by `6` numbers:
 //!
 //! 1. Page identifier.
@@ -16,12 +16,11 @@
 //!
 //! Each number is encoded as a 4 bytes, big-endian, unsigned integer. The total
 //! size of each entry is `24` bytes.
-//!
-//! [`pages_pos`]: crate::Package::pages_pos
 
 use std::io::{self, Cursor, Read, Seek, Write};
 use std::num::NonZeroU32;
 
+use crate::page::PageError;
 use crate::persistence::datablock::{DataBlocksReader, DataBlocksWriter};
 use crate::{metadata, page, BlockCompression, MetadataEntry, Page};
 
@@ -72,14 +71,14 @@ impl IndexEntry {
     pub(crate) fn get_page_title<I>(
         &self,
         db_reader: &mut DataBlocksReader<I>,
-    ) -> Result<String, page::Error>
+    ) -> Result<String, PageError>
     where
         I: Read + Seek,
     {
         let title = db_reader.with_block(
             self.metadata_block_id.into(),
             self.metadata_block_offset,
-            |bytes: &[u8]| -> Result<Option<String>, page::Error> {
+            |bytes: &[u8]| -> Result<Option<String>, PageError> {
                 let input_len = bytes.len() as u64;
                 let cursor = Cursor::new(bytes);
 
@@ -175,7 +174,7 @@ where
 pub(super) fn build_page<R>(
     entry: &IndexEntry,
     db_reader: &mut DataBlocksReader<R>,
-) -> Result<Page, page::Error>
+) -> Result<Page, PageError>
 where
     R: Read + Seek,
 {
@@ -183,14 +182,14 @@ where
     let content = db_reader.with_block(
         entry.content_block_id.into(),
         entry.content_block_offset,
-        |bytes: &[u8]| -> Result<_, page::Error> {
+        |bytes: &[u8]| -> Result<_, PageError> {
             let mut cursor = Cursor::new(bytes);
 
             let len = leb128::read::unsigned(&mut cursor)? as usize;
             let position = cursor.position() as usize;
             let bytes = match bytes.get(position..len + position) {
                 Some(bytes) => bytes,
-                None => return Err(page::Error::InvalidLength(len as u64)),
+                None => return Err(PageError::InvalidLength(len as u64)),
             };
 
             Ok(bytes.to_owned())
@@ -201,16 +200,16 @@ where
     let metadata = db_reader.with_block(
         entry.metadata_block_id.into(),
         entry.metadata_block_offset,
-        |bytes: &[u8]| -> Result<_, page::Error> {
+        |bytes: &[u8]| -> Result<_, PageError> {
             crate::metadata::load(io::Cursor::new(bytes), bytes.len() as u64)
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| page::Error::InvalidMetadata(e.to_string()))
+                .map_err(|e| PageError::InvalidMetadata(e.to_string()))
         },
     )??;
 
     // Final page.
     let page = Page {
-        id: NonZeroU32::new(entry.id).ok_or(page::Error::InvalidId(0))?,
+        id: NonZeroU32::new(entry.id).ok_or(PageError::InvalidId(0))?,
         parent_id: NonZeroU32::new(entry.parent_id),
         metadata,
         content,

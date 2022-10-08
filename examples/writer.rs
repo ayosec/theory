@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for page in &args.pages {
         book.new_page(page.display().to_string())
-            .set_content(fs::read(&page)?);
+            .set_content(fs::read(page)?);
     }
 
     // Write the book in the file.
